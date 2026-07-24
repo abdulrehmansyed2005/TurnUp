@@ -130,7 +130,7 @@ const BookSlot = () => {
             onChange={(e) => setTeamName(e.target.value)}
             maxLength={50}
           />
-          <p className="form-hint">This will only be visible to the admin.</p>
+          <p className="form-hint">Shown on the slot board — your identity stays private.</p>
         </div>
 
         <button

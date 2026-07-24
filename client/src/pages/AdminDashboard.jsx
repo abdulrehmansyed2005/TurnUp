@@ -6,8 +6,10 @@ import api from '../utils/api';
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const [blockedSlots, setBlockedSlots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('pending');
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [actionModal, setActionModal] = useState(null); // { booking, action: 'approve' | 'reject' }
   const [adminNote, setAdminNote] = useState('');
   const [processing, setProcessing] = useState(false);
@@ -16,15 +18,21 @@ const AdminDashboard = () => {
   const [turfId, setTurfId] = useState('');
   const { addToast } = useToast();
 
+  const isToday = selectedDate === new Date().toISOString().slice(0, 10);
+
   const fetchData = useCallback(async () => {
     try {
-      const [statsRes, bookingsRes, turfsRes] = await Promise.all([
+      const dateParam = `date=${selectedDate}`;
+      const statusParam = tab !== 'all' ? `&status=${tab}` : '';
+      const [statsRes, bookingsRes, turfsRes, blockedRes] = await Promise.all([
         api.get('/admin/stats'),
-        api.get(`/admin/bookings${tab !== 'all' ? `?status=${tab}` : ''}`),
+        api.get(`/admin/bookings?${dateParam}${statusParam}`),
         api.get('/turfs'),
+        api.get(`/admin/blocked-slots?${dateParam}`),
       ]);
       setStats(statsRes.data);
       setBookings(bookingsRes.data.bookings);
+      setBlockedSlots(blockedRes.data.blockedSlots || []);
       if (turfsRes.data.turfs.length > 0) {
         setTurfId(turfsRes.data.turfs[0]._id);
       }
@@ -33,7 +41,7 @@ const AdminDashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, addToast]);
+  }, [tab, selectedDate, addToast]);
 
   useEffect(() => {
     fetchData();
@@ -94,6 +102,16 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleUnblockSlot = async (slotId) => {
+    try {
+      await api.delete(`/admin/block-slot/${slotId}`);
+      addToast('Slot unblocked successfully.', 'success');
+      fetchData();
+    } catch (error) {
+      addToast(error.response?.data?.message || 'Failed to unblock slot.', 'error');
+    }
+  };
+
   // Generate slot options for block form
   const slotOptions = [
     { start: '09:00', end: '10:00' },
@@ -127,7 +145,35 @@ const AdminDashboard = () => {
 
   return (
     <div className="page">
-      <h1 className="heading-md" style={{ marginBottom: 16 }}>Admin Dashboard</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+        <h1 className="heading-md">Admin Dashboard</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            id="admin-date-picker"
+            type="date"
+            className="form-input"
+            style={{ width: 'auto', padding: '7px 12px', fontSize: 'var(--font-sm)' }}
+            value={selectedDate}
+            onChange={(e) => { setSelectedDate(e.target.value); setTab('pending'); }}
+          />
+          {!isToday && (
+            <button
+              className="btn btn-secondary btn-sm"
+              id="admin-date-today"
+              onClick={() => { setSelectedDate(new Date().toISOString().slice(0, 10)); setTab('pending'); }}
+            >
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!isToday && (
+        <div className="banner info" style={{ marginBottom: 16 }}>
+          <span className="banner-icon">📅</span>
+          <span>Viewing bookings for <strong>{new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</strong></span>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="stats-grid">
@@ -197,6 +243,33 @@ const AdminDashboard = () => {
             Block Slot
           </button>
         </form>
+      )}
+
+      {/* Blocked Slots List */}
+      {blockedSlots.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <h3 className="heading-sm" style={{ marginBottom: 10 }}>🚫 Today's Blocked Slots</h3>
+          {blockedSlots.map((slot) => (
+            <div key={slot._id} className="admin-booking-card" id={`blocked-slot-${slot._id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div className="admin-booking-time">
+                  {formatTime(slot.startTime)} — {formatTime(slot.endTime)}
+                </div>
+                <div className="text-sm text-muted" style={{ marginTop: 4 }}>
+                  🔴 {slot.reason}
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                id={`unblock-${slot._id}`}
+                onClick={() => handleUnblockSlot(slot._id)}
+              >
+                Unblock
+              </button>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Tabs */}

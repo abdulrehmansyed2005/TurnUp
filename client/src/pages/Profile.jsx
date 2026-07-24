@@ -59,7 +59,7 @@ const Profile = () => {
       </button>
 
       <p className="text-xs text-muted text-center" style={{ marginTop: 24 }}>
-        TurnUp v1.0 — FAST NUCES Lahore
+        TurnUp — FAST NUCES Lahore
       </p>
     </div>
   );

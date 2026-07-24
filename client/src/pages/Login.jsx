@@ -55,97 +55,127 @@ const Login = () => {
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
+      <div className="auth-split">
 
-        {/* Top navy header */}
-        <div className="auth-header">
-          <div className="auth-header-icon">⚽</div>
-          <h1 className="auth-header-title">TurnUp</h1>
-          <p className="auth-header-sub">FAST NUCES Lahore — Futsal Booking Portal</p>
-        </div>
-
-        {/* Form area */}
-        <div className="auth-body">
-          <h2 className="auth-form-title">Sign In</h2>
-
-          {/* Role Toggle */}
-          <div className="login-toggle" role="tablist" aria-label="Login type">
-            <button
-              id="tab-student"
-              role="tab"
-              aria-selected={!isAdmin}
-              className={`login-tab ${!isAdmin ? 'active student' : ''}`}
-              onClick={() => handleModeSwitch('student')}
-              type="button"
-            >
-              <span className="login-tab-icon">🎓</span>
-              Student
-            </button>
-            <button
-              id="tab-admin"
-              role="tab"
-              aria-selected={isAdmin}
-              className={`login-tab ${isAdmin ? 'active admin' : ''}`}
-              onClick={() => handleModeSwitch('admin')}
-              type="button"
-            >
-              <span className="login-tab-icon">⚙️</span>
-              Admin
-            </button>
+        {/* LEFT — form panel */}
+        <div className="auth-panel-right">
+          {/* Mobile-only header */}
+          <div className="auth-header auth-header-mobile">
+            <div className="auth-header-icon">⚽</div>
+            <h1 className="auth-header-title">TurnUp</h1>
+            <p className="auth-header-sub">FAST NUCES Lahore — Futsal Booking Portal</p>
           </div>
 
-          {/* Context hint */}
-          <p className={`login-hint ${isAdmin ? 'admin' : 'student'}`}>
-            {isAdmin
-              ? '🔒 Restricted access — authorized personnel only'
-              : '👋 Sign in with your NUCES student account'}
-          </p>
+          <div className="auth-body">
+            <h2 className="auth-form-title">Sign In</h2>
 
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label className="form-label" htmlFor="login-email">Email</label>
-              <input
-                id="login-email"
-                type="email"
-                className={`form-input ${isAdmin ? 'form-input-admin' : ''}`}
-                placeholder={isAdmin ? 'admin@example.com' : 'your-id@lhr.nu.edu.pk'}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-              />
+            {/* Role Toggle */}
+            <div className="login-toggle" role="tablist" aria-label="Login type">
+              <button
+                id="tab-student"
+                role="tab"
+                aria-selected={!isAdmin}
+                className={`login-tab ${!isAdmin ? 'active student' : ''}`}
+                onClick={() => handleModeSwitch('student')}
+                type="button"
+              >
+                <span className="login-tab-icon">🎓</span>
+                Student
+              </button>
+              <button
+                id="tab-admin"
+                role="tab"
+                aria-selected={isAdmin}
+                className={`login-tab ${isAdmin ? 'active admin' : ''}`}
+                onClick={() => handleModeSwitch('admin')}
+                type="button"
+              >
+                <span className="login-tab-icon">⚙️</span>
+                Admin
+              </button>
             </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="login-password">Password</label>
-              <input
-                id="login-password"
-                type="password"
-                className={`form-input ${isAdmin ? 'form-input-admin' : ''}`}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
+            {/* Context hint */}
+            <p className={`login-hint ${isAdmin ? 'admin' : 'student'}`}>
+              {isAdmin
+                ? '🔒 Restricted access — authorized personnel only'
+                : '👋 Sign in with your NUCES student account'}
+            </p>
 
-            <button
-              type="submit"
-              className={`btn btn-full ${isAdmin ? 'btn-admin' : 'btn-primary'}`}
-              disabled={loading}
-              id="login-submit"
-              style={{ marginTop: 8 }}
-            >
-              {loading ? <span className="spinner" /> : null}
-              {loading ? 'Signing in...' : isAdmin ? '⚙️ Admin Sign In' : '→ Sign In'}
-            </button>
-          </form>
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="login-email">Email</label>
+                <input
+                  id="login-email"
+                  type="email"
+                  className={`form-input ${isAdmin ? 'form-input-admin' : ''}`}
+                  placeholder={isAdmin ? 'admin@example.com' : 'your-id@lhr.nu.edu.pk'}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
+              </div>
 
-          {!isAdmin && (
-            <div className="auth-footer">
-              Don't have an account? <Link to="/register">Register</Link>
-            </div>
-          )}
+              <div className="form-group">
+                <label className="form-label" htmlFor="login-password">Password</label>
+                <input
+                  id="login-password"
+                  type="password"
+                  className={`form-input ${isAdmin ? 'form-input-admin' : ''}`}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className={`btn btn-full ${isAdmin ? 'btn-admin' : 'btn-primary'}`}
+                disabled={loading}
+                id="login-submit"
+                style={{ marginTop: 8 }}
+              >
+                {loading ? <span className="spinner" /> : null}
+                {loading ? 'Signing in...' : isAdmin ? '⚙️ Admin Sign In' : '→ Sign In'}
+              </button>
+            </form>
+
+            {!isAdmin && (
+              <div className="auth-footer">
+                Don't have an account? <Link to="/register">Register</Link>
+                <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}>·</span>
+                <Link to="/forgot-password">Forgot password?</Link>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* RIGHT — branding panel (desktop only) */}
+        <div className={`auth-panel-left ${isAdmin ? 'admin' : 'student'}`}>
+          <div className="auth-panel-left-inner">
+            <div className="auth-panel-logo">⚽</div>
+            <h1 className="auth-panel-title">TurnUp</h1>
+            <p className="auth-panel-sub">FAST NUCES Lahore<br />Futsal Booking Portal</p>
+
+            <div className="auth-panel-features">
+              <div className="auth-panel-feature">
+                <span className="auth-panel-feature-icon">📅</span>
+                <span>Book slots in seconds</span>
+              </div>
+              <div className="auth-panel-feature">
+                <span className="auth-panel-feature-icon">🔔</span>
+                <span>Real-time availability</span>
+              </div>
+              <div className="auth-panel-feature">
+                <span className="auth-panel-feature-icon">⚡</span>
+                <span>Instant confirmation</span>
+              </div>
+            </div>
+          </div>
+          <div className="auth-panel-decor" />
+        </div>
+
       </div>
     </div>
   );

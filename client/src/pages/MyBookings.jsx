@@ -24,6 +24,8 @@ const MyBookings = () => {
 
   useEffect(() => {
     fetchBookings();
+    const interval = setInterval(fetchBookings, 30000);
+    return () => clearInterval(interval);
   }, [fetchBookings]);
 
   const formatTime = (time24) => {
@@ -74,11 +76,26 @@ const MyBookings = () => {
   const activeStatuses = ['pending', 'approved'];
   const pastStatuses = ['rejected', 'cancelled', 'expired'];
 
-  const filteredBookings = bookings.filter((b) =>
-    tab === 'active'
-      ? activeStatuses.includes(b.status)
-      : pastStatuses.includes(b.status)
-  );
+  const isPastDate = (date) => {
+    const bookingDate = new Date(date);
+    const today = new Date();
+    // Compare date only (strip time)
+    bookingDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    return bookingDate < today;
+  };
+
+  const filteredBookings = bookings.filter((b) => {
+    const terminalStatus = pastStatuses.includes(b.status);
+    const dateInPast = isPastDate(b.date);
+    if (tab === 'active') {
+      // Active: pending/approved AND date is today or future
+      return activeStatuses.includes(b.status) && !dateInPast;
+    } else {
+      // Past: terminal status OR date already passed
+      return terminalStatus || (activeStatuses.includes(b.status) && dateInPast);
+    }
+  });
 
   const statusEmoji = {
     pending: '⏳',

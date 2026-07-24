@@ -149,6 +149,23 @@ const unblockSlot = async (req, res) => {
   }
 };
 
+// @route   GET /api/admin/blocked-slots
+// @desc    Get today's blocked slots
+// @access  Admin
+const getBlockedSlots = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const queryDate = date ? new Date(date) : new Date();
+    const normalizedDate = new Date(queryDate.getFullYear(), queryDate.getMonth(), queryDate.getDate());
+
+    const blockedSlots = await BlockedSlot.find({ date: normalizedDate }).sort({ startTime: 1 });
+    res.json({ blockedSlots });
+  } catch (error) {
+    console.error('Get blocked slots error:', error);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 // @route   GET /api/admin/stats
 // @desc    Get dashboard statistics
 // @access  Admin
@@ -183,4 +200,4 @@ const getStats = async (req, res) => {
   }
 };
 
-module.exports = { getAllBookings, updateBookingStatus, blockSlot, unblockSlot, getStats };
+module.exports = { getAllBookings, updateBookingStatus, blockSlot, unblockSlot, getStats, getBlockedSlots };

@@ -247,4 +247,90 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { register, verifyOTP, resendOTP, login, getMe };
+// @route   POST /api/auth/forgot-password
+// @desc    Send password-reset OTP to user's email
+// @access  Public
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required.' });
+
+    const user = await User.findOne({ email });
+    // Always return success to prevent email enumeration
+    if (!user || !user.isVerified) {
+      return res.json({ message: 'If that email exists, a reset code has been sent.' });
+    }
+
+    const otp = generateOTP();
+    console.log(`\n🔑 [DEV] Password Reset OTP for ${email}: ${otp}\n`);
+    const salt = await bcrypt.genSalt(10);
+    user.otp = await bcrypt.hash(otp, salt);
+    user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    await user.save();
+
+    try {
+      const { sendEmail } = require('../utils/sendEmail');
+      const html = `
+        <div style="font-family: 'Inter', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: linear-gradient(135deg, #0a0f1c 0%, #111827 100%); border-radius: 16px; border: 1px solid rgba(245,158,11,0.25);">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="color: #f59e0b; font-size: 28px; margin: 0;">⚽ TurnUp</h1>
+            <p style="color: #9ca3af; font-size: 14px; margin: 4px 0 0;">Password Reset Request</p>
+          </div>
+          <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 24px; text-align: center;">
+            <p style="color: #e5e7eb; font-size: 16px; margin: 0 0 16px;">Your password reset code is:</p>
+            <div style="background: rgba(245,158,11,0.1); border: 2px dashed #f59e0b; border-radius: 12px; padding: 16px; display: inline-block;">
+              <span style="color: #f59e0b; font-size: 36px; font-weight: 700; letter-spacing: 8px;">${otp}</span>
+            </div>
+            <p style="color: #9ca3af; font-size: 13px; margin: 16px 0 0;">This code expires in <strong style="color: #f59e0b;">10 minutes</strong>.</p>
+          </div>
+          <p style="color: #6b7280; font-size: 12px; text-align: center; margin: 20px 0 0;">If you didn't request this, ignore this email.</p>
+        </div>
+      `;
+      await sendEmail(email, 'TurnUp — Password Reset Code', html);
+    } catch (emailErr) {
+      console.error('Reset email send error:', emailErr);
+    }
+
+    res.json({ message: 'If that email exists, a reset code has been sent.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+};
+
+// @route   POST /api/auth/reset-password
+// @desc    Verify OTP and set new password
+// @access  Public
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'Email, OTP, and new password are required.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    }
+
+    const user = await User.findOne({ email }).select('+otp +otpExpiry +password');
+    if (!user) return res.status(400).json({ message: 'User not found.' });
+
+    if (!user.otpExpiry || user.otpExpiry < new Date()) {
+      return res.status(400).json({ message: 'Reset code has expired. Please request a new one.' });
+    }
+
+    const isMatch = await bcrypt.compare(otp, user.otp);
+    if (!isMatch) return res.status(400).json({ message: 'Invalid reset code. Please try again.' });
+
+    user.password = newPassword; // pre-save hook will hash it
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+    await user.save();
+
+    res.json({ message: 'Password reset successfully. You can now log in.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+};
+
+module.exports = { register, verifyOTP, resendOTP, login, getMe, forgotPassword, resetPassword };
