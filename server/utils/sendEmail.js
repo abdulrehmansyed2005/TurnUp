@@ -1,22 +1,21 @@
 const nodemailer = require('nodemailer');
 
 const sendEmail = async (to, subject, html) => {
+  // Transporter created fresh each call so it always reads current process.env values
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // Use App Password, not regular password
+      pass: process.env.EMAIL_PASS, // Gmail App Password
     },
   });
 
-  const mailOptions = {
-    from: `"TurnUp" <${process.env.EMAIL_USER}>`,
+  await transporter.sendMail({
+    from: `"TurnUp ⚽" <${process.env.EMAIL_USER}>`,
     to,
     subject,
     html,
-  };
-
-  await transporter.sendMail(mailOptions);
+  });
 };
 
 const sendOTPEmail = async (email, otp) => {
@@ -41,3 +40,4 @@ const sendOTPEmail = async (email, otp) => {
 };
 
 module.exports = { sendEmail, sendOTPEmail };
+
