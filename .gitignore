@@ -14,6 +14,9 @@ client/.env
 client/.env.local
 client/.env.*.local
 
+# Local agent context file — keep local only
+PROJECT_CONTEXT.md
+
 # Logs
 *.log
 npm-debug.log*
