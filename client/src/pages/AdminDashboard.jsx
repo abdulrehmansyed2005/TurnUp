@@ -1,46 +1,121 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useToast } from '../components/Toast';
 import Modal from '../components/Modal';
 import api from '../utils/api';
+
+// FIX #8: Play a subtle notification sound via Web Audio API (no file needed)
+const playNotificationSound = () => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+    oscillator.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + 0.4);
+  } catch (e) {
+    // AudioContext not supported — silently skip
+  }
+};
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
+  const [turf, setTurf] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('pending');
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [actionModal, setActionModal] = useState(null); // { booking, action: 'approve' | 'reject' }
+  const [actionModal, setActionModal] = useState(null);
   const [adminNote, setAdminNote] = useState('');
   const [processing, setProcessing] = useState(false);
   const [blockForm, setBlockForm] = useState({ startTime: '', endTime: '', reason: '' });
   const [showBlockForm, setShowBlockForm] = useState(false);
   const [turfId, setTurfId] = useState('');
   const { addToast } = useToast();
+  const prevPendingCount = useRef(null);   // FIX #8: track previous pendingCount for diff
+  const tabFlashInterval = useRef(null);   // FIX #8: tab title flash interval
 
   const isToday = selectedDate === new Date().toISOString().slice(0, 10);
+
+  // FIX #8: Request browser notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    // Clean up tab flash on unmount
+    return () => {
+      if (tabFlashInterval.current) clearInterval(tabFlashInterval.current);
+      document.title = 'TurnUp ⚽ — Admin';
+    };
+  }, []);
+
+  // FIX #8: Flash the tab title to draw attention
+  const startTabFlash = (count) => {
+    if (tabFlashInterval.current) clearInterval(tabFlashInterval.current);
+    let toggle = true;
+    tabFlashInterval.current = setInterval(() => {
+      document.title = toggle
+        ? `🔔 ${count} New Booking${count > 1 ? 's' : ''} — TurnUp`
+        : 'Admin Dashboard — TurnUp';
+      toggle = !toggle;
+    }, 1000);
+    // Stop flashing after 30 seconds
+    setTimeout(() => {
+      if (tabFlashInterval.current) clearInterval(tabFlashInterval.current);
+      document.title = 'TurnUp ⚽ — Admin';
+    }, 30000);
+  };
 
   const fetchData = useCallback(async () => {
     try {
       const dateParam = `date=${selectedDate}`;
       const statusParam = tab !== 'all' ? `&status=${tab}` : '';
       const [statsRes, bookingsRes, turfsRes, blockedRes] = await Promise.all([
-        api.get('/admin/stats'),
+        api.get(`/admin/stats?${dateParam}`),
         api.get(`/admin/bookings?${dateParam}${statusParam}`),
         api.get('/turfs'),
         api.get(`/admin/blocked-slots?${dateParam}`),
       ]);
-      setStats(statsRes.data);
+
+      const newStats = statsRes.data;
+      const newPending = newStats.pendingCount || 0;
+
+      // FIX #8: Detect new pending bookings and alert admin
+      if (prevPendingCount.current !== null && newPending > prevPendingCount.current) {
+        const diff = newPending - prevPendingCount.current;
+        playNotificationSound();
+        startTabFlash(diff);
+        // Browser push notification
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('TurnUp ⚽ — New Booking', {
+            body: `${diff} new booking request${diff > 1 ? 's' : ''} waiting for approval.`,
+            icon: '/pwa-icon-192.png',
+            tag: 'new-booking',
+            renotify: true,
+          });
+        }
+      }
+      prevPendingCount.current = newPending;
+
+      setStats(newStats);
       setBookings(bookingsRes.data.bookings);
       setBlockedSlots(blockedRes.data.blockedSlots || []);
       if (turfsRes.data.turfs.length > 0) {
         setTurfId(turfsRes.data.turfs[0]._id);
+        setTurf(turfsRes.data.turfs[0]);
       }
     } catch (error) {
       addToast('Failed to load data.', 'error');
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, selectedDate, addToast]);
 
   useEffect(() => {
@@ -112,17 +187,21 @@ const AdminDashboard = () => {
     }
   };
 
-  // Generate slot options for block form
-  const slotOptions = [
-    { start: '09:00', end: '10:00' },
-    { start: '10:00', end: '11:00' },
-    { start: '11:00', end: '12:00' },
-    { start: '12:00', end: '13:00' },
-    { start: '13:00', end: '14:00' },
-    { start: '14:00', end: '15:00' },
-    { start: '15:00', end: '16:00' },
-    { start: '16:00', end: '17:00' },
-  ];
+  // FIX #6: Derive slot options dynamically from turf data instead of hardcoding
+  const slotOptions = (() => {
+    if (!turf) return [];
+    const slots = [];
+    const [openH] = turf.openTime.split(':').map(Number);
+    const [closeH] = turf.closeTime.split(':').map(Number);
+    const duration = turf.slotDuration; // minutes
+    for (let h = openH; h < closeH; h += duration / 60) {
+      const start = `${String(h).padStart(2, '0')}:00`;
+      const endH = h + duration / 60;
+      const end = `${String(endH).padStart(2, '0')}:00`;
+      slots.push({ start, end });
+    }
+    return slots;
+  })();
 
   const statusEmoji = {
     pending: '⏳',
@@ -175,7 +254,7 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* Stats */}
+      {/* Stats — FIX #7: now date-aware, FIX #20: show cancelled/rejected */}
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-value">{stats?.pendingCount || 0}</div>
@@ -186,8 +265,16 @@ const AdminDashboard = () => {
           <div className="stat-label">Approved</div>
         </div>
         <div className="stat-card">
+          <div className="stat-value">{stats?.cancelledCount || 0}</div>
+          <div className="stat-label">Cancelled</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats?.rejectedCount || 0}</div>
+          <div className="stat-label">Rejected</div>
+        </div>
+        <div className="stat-card">
           <div className="stat-value">{stats?.todayBookings || 0}</div>
-          <div className="stat-label">Total Today</div>
+          <div className="stat-label">Total Submitted</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats?.totalUsers || 0}</div>

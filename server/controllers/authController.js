@@ -4,10 +4,8 @@ const { sendOTPEmail } = require('../utils/sendEmail');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
-// Generate 6-digit OTP
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
+// H6: Use crypto.randomInt — cryptographically secure (Math.random() state is reconstructable)
+const generateOTP = () => crypto.randomInt(100000, 1000000).toString();
 
 // @route   POST /api/auth/register
 // @desc    Register a new student
@@ -32,10 +30,11 @@ const register = async (req, res) => {
       if (!existingUser.isVerified) {
         // User exists but not verified — resend OTP
         const otp = generateOTP();
-        console.log(`\n📧 [DEV] OTP for ${email}: ${otp}\n`);
+        if (process.env.NODE_ENV !== 'production') console.log(`\n📧 [DEV] OTP for ${email}: ${otp}\n`);
         const salt = await bcrypt.genSalt(10);
         existingUser.otp = await bcrypt.hash(otp, salt);
         existingUser.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+        existingUser.otpAttempts = 0; // reset counter on fresh OTP
         await existingUser.save();
 
         try {
@@ -53,9 +52,9 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
 
-    // Generate OTP
+    // Generate new OTP
     const otp = generateOTP();
-    console.log(`\n📧 [DEV] OTP for ${email}: ${otp}\n`);
+    if (process.env.NODE_ENV !== 'production') console.log(`\n📧 [DEV] OTP for ${email}: ${otp}\n`);
     const salt = await bcrypt.genSalt(10);
     const hashedOTP = await bcrypt.hash(otp, salt);
 
@@ -86,6 +85,11 @@ const register = async (req, res) => {
   } catch (error) {
     console.error('Register error:', error);
     if (error.code === 11000) {
+      // M3: Detect which field caused the duplicate so the error message is accurate
+      const dupField = error.keyValue ? Object.keys(error.keyValue)[0] : 'email';
+      if (dupField === 'rollNumber') {
+        return res.status(400).json({ message: 'This roll number is already registered.' });
+      }
       return res.status(400).json({ message: 'An account with this email already exists.' });
     }
     if (error.name === 'ValidationError') {
@@ -107,7 +111,7 @@ const verifyOTP = async (req, res) => {
       return res.status(400).json({ message: 'Email and OTP are required.' });
     }
 
-    const user = await User.findOne({ email }).select('+otp +otpExpiry');
+    const user = await User.findOne({ email }).select('+otp +otpExpiry +otpAttempts');
     if (!user) {
       return res.status(400).json({ message: 'User not found.' });
     }
@@ -121,16 +125,38 @@ const verifyOTP = async (req, res) => {
       return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
     }
 
+    // FIX #11: Check if OTP is already locked out from too many attempts
+    if (user.otpAttempts >= 3) {
+      return res.status(400).json({
+        message: 'Too many wrong attempts. Please request a new OTP.',
+      });
+    }
+
     // Verify OTP
     const isMatch = await bcrypt.compare(otp, user.otp);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+      user.otpAttempts += 1;
+      if (user.otpAttempts >= 3) {
+        // Invalidate OTP so they must resend
+        user.otp = undefined;
+        user.otpExpiry = undefined;
+        await user.save();
+        return res.status(400).json({
+          message: 'Too many wrong attempts. Your OTP has been invalidated. Please request a new one.',
+        });
+      }
+      await user.save();
+      const attemptsLeft = 3 - user.otpAttempts;
+      return res.status(400).json({
+        message: `Invalid OTP. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} remaining.`,
+      });
     }
 
-    // Mark as verified
+    // Correct OTP — mark as verified and clear OTP fields
     user.isVerified = true;
     user.otp = undefined;
     user.otpExpiry = undefined;
+    user.otpAttempts = 0;
     await user.save();
 
     // Generate token
@@ -159,20 +185,19 @@ const resendOTP = async (req, res) => {
     }
 
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'User not found.' });
-    }
 
-    if (user.isVerified) {
-      return res.status(400).json({ message: 'Email is already verified.' });
+    // H8: Generic response — don't reveal whether email is registered
+    if (!user || user.isVerified) {
+      return res.json({ message: 'If that email is registered and unverified, a new code has been sent.' });
     }
 
     // Generate new OTP
     const otp = generateOTP();
-    console.log(`\n📧 [DEV] OTP for ${email}: ${otp}\n`);
+    if (process.env.NODE_ENV !== 'production') console.log(`\n📧 [DEV] Resend OTP for ${email}: ${otp}\n`); // M11 fixed
     const salt = await bcrypt.genSalt(10);
     user.otp = await bcrypt.hash(otp, salt);
     user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    user.otpAttempts = 0;
     await user.save();
 
     // Send OTP email
@@ -183,7 +208,7 @@ const resendOTP = async (req, res) => {
       return res.status(500).json({ message: 'Failed to send OTP. Please try again.' });
     }
 
-    res.json({ message: 'New OTP sent to your email.' });
+    res.json({ message: 'If that email is registered and unverified, a new code has been sent.' });
   } catch (error) {
     console.error('Resend OTP error:', error);
     res.status(500).json({ message: 'Server error. Please try again.' });
@@ -201,16 +226,46 @@ const login = async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required.' });
     }
 
-    // Find user with password
-    const user = await User.findOne({ email }).select('+password');
+    // Find user with password and login-lock fields
+    const user = await User.findOne({ email }).select('+password +loginAttempts +loginLockUntil');
     if (!user) {
+      // H7: Generic message — don't reveal whether email exists
       return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    // H7: Check account lock
+    if (user.loginLockUntil && user.loginLockUntil > new Date()) {
+      const minutesLeft = Math.ceil((user.loginLockUntil - new Date()) / 60000);
+      return res.status(429).json({
+        message: `Account temporarily locked due to too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}.`,
+      });
     }
 
     // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+      // H7: Increment attempt counter, lock after 5 fails
+      user.loginAttempts = (user.loginAttempts || 0) + 1;
+      if (user.loginAttempts >= 5) {
+        user.loginLockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 min lock
+        user.loginAttempts = 0;
+        await user.save();
+        return res.status(429).json({
+          message: 'Too many failed attempts. Account locked for 15 minutes.',
+        });
+      }
+      await user.save();
+      const attemptsLeft = 5 - user.loginAttempts;
+      return res.status(401).json({
+        message: `Invalid email or password. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} remaining before lockout.`,
+      });
+    }
+
+    // Correct password — reset lockout counter
+    if (user.loginAttempts > 0 || user.loginLockUntil) {
+      user.loginAttempts = 0;
+      user.loginLockUntil = null;
+      await user.save();
     }
 
     // Check if verified
@@ -255,17 +310,25 @@ const forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Email is required.' });
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select('+otp +otpExpiry +otpAttempts');
     // Always return success to prevent email enumeration
     if (!user || !user.isVerified) {
       return res.json({ message: 'If that email exists, a reset code has been sent.' });
     }
 
+    // H9: Rate-limit per email — max one reset request per 2 minutes
+    if (user.otpExpiry && user.otpExpiry > new Date(Date.now() + 8 * 60 * 1000)) {
+      return res.status(429).json({
+        message: 'A reset code was already sent recently. Please wait 2 minutes before requesting another.',
+      });
+    }
+
     const otp = generateOTP();
-    console.log(`\n🔑 [DEV] Password Reset OTP for ${email}: ${otp}\n`);
+    if (process.env.NODE_ENV !== 'production') console.log(`\n🔑 [DEV] Password Reset OTP for ${email}: ${otp}\n`); // M12 fixed
     const salt = await bcrypt.genSalt(10);
     user.otp = await bcrypt.hash(otp, salt);
     user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    user.otpAttempts = 0;
     await user.save();
 
     try {
@@ -311,19 +374,42 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: 'Password must be at least 6 characters.' });
     }
 
-    const user = await User.findOne({ email }).select('+otp +otpExpiry +password');
+    const user = await User.findOne({ email }).select('+otp +otpExpiry +otpAttempts +password');
     if (!user) return res.status(400).json({ message: 'User not found.' });
 
     if (!user.otpExpiry || user.otpExpiry < new Date()) {
       return res.status(400).json({ message: 'Reset code has expired. Please request a new one.' });
     }
 
+    // FIX #11: Check attempt count before verifying
+    if (user.otpAttempts >= 3) {
+      return res.status(400).json({
+        message: 'Too many wrong attempts. Please request a new reset code.',
+      });
+    }
+
     const isMatch = await bcrypt.compare(otp, user.otp);
-    if (!isMatch) return res.status(400).json({ message: 'Invalid reset code. Please try again.' });
+    if (!isMatch) {
+      user.otpAttempts += 1;
+      if (user.otpAttempts >= 3) {
+        user.otp = undefined;
+        user.otpExpiry = undefined;
+        await user.save();
+        return res.status(400).json({
+          message: 'Too many wrong attempts. Your reset code has been invalidated. Please request a new one.',
+        });
+      }
+      await user.save();
+      const attemptsLeft = 3 - user.otpAttempts;
+      return res.status(400).json({
+        message: `Invalid reset code. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} remaining.`,
+      });
+    }
 
     user.password = newPassword; // pre-save hook will hash it
     user.otp = undefined;
     user.otpExpiry = undefined;
+    user.otpAttempts = 0;
     await user.save();
 
     res.json({ message: 'Password reset successfully. You can now log in.' });

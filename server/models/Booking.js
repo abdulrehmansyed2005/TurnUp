@@ -62,8 +62,18 @@ bookingSchema.index(
   }
 );
 
-// Index for quick lookup of user's bookings by date
-bookingSchema.index({ user: 1, date: 1 });
+// FIX #17: Compound unique index prevents a user from having more than one
+// active (pending/approved) booking per day — even under concurrent requests.
+bookingSchema.index(
+  { user: 1, date: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ['pending', 'approved'] },
+    },
+    name: 'unique_active_booking_per_user_per_day',
+  }
+);
 
 // Index for admin queries
 bookingSchema.index({ date: 1, status: 1 });

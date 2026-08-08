@@ -39,10 +39,12 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Department is required'],
     trim: true,
+    maxlength: [100, 'Department name is too long'], // M10: enforce max length
   },
   rollNumber: {
     type: String,
     required: [true, 'Roll number is required'],
+    unique: true,
     trim: true,
   },
   isVerified: {
@@ -55,6 +57,22 @@ const userSchema = new mongoose.Schema({
   },
   otpExpiry: {
     type: Date,
+    select: false,
+  },
+  otpAttempts: {
+    type: Number,
+    default: 0,
+    select: false,
+  },
+  // H7: per-account brute-force protection for login
+  loginAttempts: {
+    type: Number,
+    default: 0,
+    select: false,
+  },
+  loginLockUntil: {
+    type: Date,
+    default: null,
     select: false,
   },
 }, {
@@ -79,6 +97,9 @@ userSchema.methods.toJSON = function () {
   delete obj.password;
   delete obj.otp;
   delete obj.otpExpiry;
+  delete obj.otpAttempts;
+  delete obj.loginAttempts;
+  delete obj.loginLockUntil;
   delete obj.__v;
   return obj;
 };

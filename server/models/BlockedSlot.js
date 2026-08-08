@@ -22,6 +22,7 @@ const blockedSlotSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Reason for blocking is required'],
     trim: true,
+    maxlength: [200, 'Reason cannot exceed 200 characters'], // L9: prevent bloated API responses
   },
   blockedBy: {
     type: mongoose.Schema.Types.ObjectId,

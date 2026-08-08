@@ -10,6 +10,15 @@ const seedAdmin = async () => {
       return;
     }
 
+    // L2: Do not fall back to a default password — abort loudly if not configured
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminPassword) {
+      throw new Error(
+        'ADMIN_PASSWORD is not set in .env. Refusing to create admin account with a default password. ' +
+        'Set ADMIN_PASSWORD in your environment and restart.'
+      );
+    }
+
     // Check if admin already exists
     const existingAdmin = await User.findOne({ email: adminEmail });
     if (existingAdmin) {
@@ -21,7 +30,7 @@ const seedAdmin = async () => {
     const admin = await User.create({
       name: process.env.ADMIN_NAME || 'Sports Head',
       email: adminEmail,
-      password: process.env.ADMIN_PASSWORD || 'admin123',
+      password: adminPassword,
       role: 'admin',
       department: 'Sports',
       rollNumber: 'ADMIN',

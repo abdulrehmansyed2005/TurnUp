@@ -1,6 +1,13 @@
 const Booking = require('../models/Booking');
 const BlockedSlot = require('../models/BlockedSlot');
 const Turf = require('../models/Turf');
+const mongoose = require('mongoose');
+
+// Allowed booking status values for query filtering
+const ALLOWED_STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'expired'];
+
+// H2: Strip HTML tags from team name to prevent stored email injection
+const sanitizeTeamName = (name) => String(name).replace(/<[^>]*>/g, '').trim();
 
 // Helper: Get today's date normalized to midnight (local time)
 const getTodayDate = () => {
@@ -195,6 +202,20 @@ const createBooking = async (req, res) => {
       return res.status(400).json({ message: 'You already have a booking for today. One slot per person per day.' });
     }
 
+    // FIX #14: Block re-booking the exact same slot that was previously rejected
+    const rejectedSameSlot = await Booking.findOne({
+      user: req.user._id,
+      turf: turfId,
+      date: today,
+      startTime,
+      status: 'rejected',
+    });
+    if (rejectedSameSlot) {
+      return res.status(400).json({
+        message: 'This slot was already rejected for you today. Please choose a different slot.',
+      });
+    }
+
     // Check if user is locked out (cancelled within 2 hours)
     const cancelledBooking = await Booking.findOne({
       user: req.user._id,
@@ -234,7 +255,7 @@ const createBooking = async (req, res) => {
       date: today,
       startTime,
       endTime,
-      teamName,
+      teamName: sanitizeTeamName(teamName), // H2: strip any HTML before storing
       status: 'pending',
     });
 
@@ -259,7 +280,11 @@ const getMyBookings = async (req, res) => {
     const { status } = req.query;
     const query = { user: req.user._id };
 
-    if (status) {
+    // M6: Validate status is a plain string in the allowed enum — not an object/operator
+    if (status !== undefined) {
+      if (typeof status !== 'string' || !ALLOWED_STATUSES.includes(status)) {
+        return res.status(400).json({ message: 'Invalid status value.' });
+      }
       query.status = status;
     }
 
@@ -282,6 +307,11 @@ const getMyBookings = async (req, res) => {
 // @access  Private
 const cancelBooking = async (req, res) => {
   try {
+    // M9: Validate booking ID before querying
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID.' });
+    }
+
     const booking = await Booking.findById(req.params.id);
 
     if (!booking) {
@@ -296,6 +326,23 @@ const cancelBooking = async (req, res) => {
     // Check if booking is cancellable
     if (!['pending', 'approved'].includes(booking.status)) {
       return res.status(400).json({ message: 'This booking cannot be cancelled.' });
+    }
+
+    // FIX #15: Prevent cancellation once the slot's end time has passed (it's history)
+    const currentTime = getCurrentTime();
+    if (timeToMinutes(booking.endTime) <= timeToMinutes(currentTime)) {
+      return res.status(400).json({ message: 'Cannot cancel a slot that has already ended.' });
+    }
+
+    // FIX #16: Daily cancellation limit — max 3 cancellations per day
+    const today = getTodayDate();
+    const cancelledTodayCount = await Booking.countDocuments({
+      user: req.user._id,
+      date: today,
+      status: 'cancelled',
+    });
+    if (cancelledTodayCount >= 3) {
+      return res.status(400).json({ message: 'You have reached the daily cancellation limit (3). Please contact the sports office.' });
     }
 
     // Calculate 2-hour rule
