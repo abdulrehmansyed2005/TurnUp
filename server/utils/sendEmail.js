@@ -8,6 +8,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS, // Gmail App Password
   },
+  // Force IPv4 — prevents ENETUNREACH when the network cannot route IPv6
+  // (Gmail SMTP resolves to both IPv4 and IPv6; some environments only support IPv4)
+  family: 4,
 });
 
 const sendEmail = async (to, subject, html) => {
