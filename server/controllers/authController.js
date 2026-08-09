@@ -37,11 +37,8 @@ const register = async (req, res) => {
         existingUser.otpAttempts = 0; // reset counter on fresh OTP
         await existingUser.save();
 
-        try {
-          await sendOTPEmail(email, otp);
-        } catch (emailErr) {
-          console.error('Email send error:', emailErr);
-        }
+        // Fire-and-forget — don't block response waiting for SMTP
+        sendOTPEmail(email, otp).catch((emailErr) => console.error('Email send error:', emailErr));
 
         return res.status(200).json({
           message: 'Account exists but not verified. New OTP sent to your email.',
@@ -69,13 +66,8 @@ const register = async (req, res) => {
       otpExpiry: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
     });
 
-    // Send OTP email
-    try {
-      await sendOTPEmail(email, otp);
-    } catch (emailErr) {
-      console.error('Email send error:', emailErr);
-      // Don't fail registration if email fails — user can resend
-    }
+    // Fire-and-forget — don't block response waiting for SMTP
+    sendOTPEmail(email, otp).catch((emailErr) => console.error('Email send error:', emailErr));
 
     res.status(201).json({
       message: 'Registration successful! Check your email for the verification code.',
