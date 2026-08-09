@@ -1,46 +1,20 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns').promises;
+const { Resend } = require('resend');
 
-// Railway's network resolves smtp.gmail.com to IPv6 addresses that it cannot route.
-// We pre-resolve to an IPv4 address using dns.resolve4 (A records only, never AAAA)
-// and pass the IP directly to Nodemailer so its internal resolver is never invoked.
-let _transporter = null;
+// Resend uses HTTPS (not SMTP) — works on Railway where outbound SMTP is firewalled.
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const getTransporter = async () => {
-  if (_transporter) return _transporter;
-
-  let host = 'smtp.gmail.com';
-  try {
-    const addrs = await dns.resolve4('smtp.gmail.com');
-    if (addrs.length > 0) {
-      host = addrs[0];
-      console.log(`[Email] Resolved smtp.gmail.com → ${host} (IPv4)`);
-    }
-  } catch (err) {
-    console.warn('[Email] dns.resolve4 failed, falling back to hostname:', err.message);
-  }
-
-  _transporter = nodemailer.createTransport({
-    host,           // IPv4 address — bypasses Nodemailer DNS entirely
-    port: 587,
-    secure: false,  // STARTTLS
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // Gmail App Password
-    },
-  });
-
-  return _transporter;
-};
+// Until a custom domain is verified on Resend, emails come from onboarding@resend.dev.
+// To send from turnup.nu@gmail.com, verify a domain at resend.com/domains.
+const FROM_ADDRESS = 'TurnUp ⚽ <onboarding@resend.dev>';
 
 const sendEmail = async (to, subject, html) => {
-  const t = await getTransporter();
-  await t.sendMail({
-    from: `"TurnUp ⚽" <${process.env.EMAIL_USER}>`,
+  const { error } = await resend.emails.send({
+    from: FROM_ADDRESS,
     to,
     subject,
     html,
   });
+  if (error) throw new Error(`Resend error: ${error.message}`);
 };
 
 const sendOTPEmail = async (email, otp) => {
