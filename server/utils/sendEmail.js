@@ -3,14 +3,18 @@ const nodemailer = require('nodemailer');
 // L10: Create transporter ONCE at module load — not on every email call.
 // Creating a new SMTP connection per email causes connection limit issues under burst load.
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  // Explicit host/port instead of service:'gmail' so socketOptions are honoured.
+  // service:'gmail' short-circuit ignores the family option, causing ENETUNREACH
+  // on Railway where IPv6 routing to Google SMTP is broken.
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // STARTTLS on port 587
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS, // Gmail App Password
   },
-  // Force IPv4 — prevents ENETUNREACH when the network cannot route IPv6
-  // (Gmail SMTP resolves to both IPv4 and IPv6; some environments only support IPv4)
-  family: 4,
+  // Force IPv4 at the TCP socket level — prevents ENETUNREACH on IPv6-only DNS answers
+  socketOptions: { family: 4 },
 });
 
 const sendEmail = async (to, subject, html) => {
