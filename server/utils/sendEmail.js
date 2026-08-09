@@ -1,24 +1,41 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns').promises;
 
-// L10: Create transporter ONCE at module load — not on every email call.
-// Creating a new SMTP connection per email causes connection limit issues under burst load.
-const transporter = nodemailer.createTransport({
-  // Explicit host/port instead of service:'gmail' so socketOptions are honoured.
-  // service:'gmail' short-circuit ignores the family option, causing ENETUNREACH
-  // on Railway where IPv6 routing to Google SMTP is broken.
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // STARTTLS on port 587
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // Gmail App Password
-  },
-  // Force IPv4 at the TCP socket level — prevents ENETUNREACH on IPv6-only DNS answers
-  socketOptions: { family: 4 },
-});
+// Railway's network resolves smtp.gmail.com to IPv6 addresses that it cannot route.
+// We pre-resolve to an IPv4 address using dns.resolve4 (A records only, never AAAA)
+// and pass the IP directly to Nodemailer so its internal resolver is never invoked.
+let _transporter = null;
+
+const getTransporter = async () => {
+  if (_transporter) return _transporter;
+
+  let host = 'smtp.gmail.com';
+  try {
+    const addrs = await dns.resolve4('smtp.gmail.com');
+    if (addrs.length > 0) {
+      host = addrs[0];
+      console.log(`[Email] Resolved smtp.gmail.com → ${host} (IPv4)`);
+    }
+  } catch (err) {
+    console.warn('[Email] dns.resolve4 failed, falling back to hostname:', err.message);
+  }
+
+  _transporter = nodemailer.createTransport({
+    host,           // IPv4 address — bypasses Nodemailer DNS entirely
+    port: 587,
+    secure: false,  // STARTTLS
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS, // Gmail App Password
+    },
+  });
+
+  return _transporter;
+};
 
 const sendEmail = async (to, subject, html) => {
-  await transporter.sendMail({
+  const t = await getTransporter();
+  await t.sendMail({
     from: `"TurnUp ⚽" <${process.env.EMAIL_USER}>`,
     to,
     subject,
