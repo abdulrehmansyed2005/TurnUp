@@ -1,46 +1,33 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns').promises;
+const Brevo = require('@getbrevo/brevo');
 
-// Railway's network resolves smtp.gmail.com to IPv6 addresses that it cannot route.
-// We pre-resolve to an IPv4 address using dns.resolve4 (A records only, never AAAA)
-// and pass the IP directly to Nodemailer so its internal resolver is never invoked.
-let _transporter = null;
+// Lazily initialised API client — created once and reused.
+let _apiInstance = null;
 
-const getTransporter = async () => {
-  if (_transporter) return _transporter;
+const getApiInstance = () => {
+  if (_apiInstance) return _apiInstance;
 
-  let host = 'smtp.gmail.com';
-  try {
-    const addrs = await dns.resolve4('smtp.gmail.com');
-    if (addrs.length > 0) {
-      host = addrs[0];
-      console.log(`[Email] Resolved smtp.gmail.com → ${host} (IPv4)`);
-    }
-  } catch (err) {
-    console.warn('[Email] dns.resolve4 failed, falling back to hostname:', err.message);
-  }
-
-  _transporter = nodemailer.createTransport({
-    host,           // IPv4 address — bypasses Nodemailer DNS entirely
-    port: 587,
-    secure: false,  // STARTTLS
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // Gmail App Password
-    },
-  });
-
-  return _transporter;
+  const apiInstance = new Brevo.TransactionalEmailsApi();
+  apiInstance.setApiKey(
+    Brevo.TransactionalEmailsApiApiKeys.apiKey,
+    process.env.BREVO_API_KEY
+  );
+  _apiInstance = apiInstance;
+  return _apiInstance;
 };
 
 const sendEmail = async (to, subject, html) => {
-  const t = await getTransporter();
-  await t.sendMail({
-    from: `"TurnUp ⚽" <${process.env.EMAIL_USER}>`,
-    to,
-    subject,
-    html,
-  });
+  const api = getApiInstance();
+
+  const sendSmtpEmail = new Brevo.SendSmtpEmail();
+  sendSmtpEmail.sender = {
+    name: 'TurnUp ⚽',
+    email: process.env.EMAIL_FROM, // must be a verified sender in your Brevo account
+  };
+  sendSmtpEmail.to = [{ email: to }];
+  sendSmtpEmail.subject = subject;
+  sendSmtpEmail.htmlContent = html;
+
+  await api.sendTransacEmail(sendSmtpEmail);
 };
 
 const sendOTPEmail = async (email, otp) => {
