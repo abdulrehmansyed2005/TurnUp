@@ -26,6 +26,22 @@ const register = async (req, res) => {
       });
     }
 
+    // Cross-validate roll number against email
+    // Email encodes: l(YY)(RRRR)@... e.g. l240690 → year=24, roll=0690
+    // Roll number must match: YY[Ll]-RRRR e.g. 24L-0690
+    const emailMatch = email.match(/^l(\d{2})(\d{4})@/);
+    const rollMatch = rollNumber.match(/^(\d{2})[Ll]-(\d{4})$/);
+
+    if (!rollMatch) {
+      return res.status(400).json({ message: 'Roll number must follow the format 24L-0690.' });
+    }
+
+    if (emailMatch[1] !== rollMatch[1] || emailMatch[2] !== rollMatch[2]) {
+      return res.status(400).json({
+        message: 'Roll number does not match your email address.',
+      });
+    }
+
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {

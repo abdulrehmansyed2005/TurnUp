@@ -50,6 +50,20 @@ const Register = () => {
       return;
     }
 
+    // Cross-validate roll number against email
+    const emailMatch = form.email.match(/^l(\d{2})(\d{4})@/);
+    const rollMatch = form.rollNumber.match(/^(\d{2})[Ll]-(\d{4})$/);
+
+    if (!rollMatch) {
+      addToast('Roll number must follow the format 24L-0690.', 'error');
+      return;
+    }
+
+    if (emailMatch[1] !== rollMatch[1] || emailMatch[2] !== rollMatch[2]) {
+      addToast('Roll number does not match your email address.', 'error');
+      return;
+    }
+
     if (form.password.length < 6) {
       addToast('Password must be at least 6 characters.', 'error');
       return;
