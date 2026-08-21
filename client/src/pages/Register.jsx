@@ -146,7 +146,7 @@ const Register = () => {
                     type="text"
                     name="rollNumber"
                     className="form-input"
-                    placeholder="22i-0000"
+                    placeholder="e.g. 0690"
                     value={form.rollNumber}
                     onChange={handleChange}
                   />
