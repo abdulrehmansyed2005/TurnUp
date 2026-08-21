@@ -146,7 +146,7 @@ const Register = () => {
                     type="text"
                     name="rollNumber"
                     className="form-input"
-                    placeholder="e.g. 0690"
+                    placeholder="4-digit roll number"
                     value={form.rollNumber}
                     onChange={handleChange}
                   />
