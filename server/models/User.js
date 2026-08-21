@@ -17,11 +17,13 @@ const userSchema = new mongoose.Schema({
     trim: true,
     validate: {
       validator: function (v) {
-        // Admin accounts can use any email; students must use @lhr.nu.edu.pk
+        // Admin accounts can use any email
         if (this.role === 'admin') return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-        return /^[^\s@]+@lhr\.nu\.edu\.pk$/.test(v);
+        // Students must match: l(2-digit year)(4-digit roll)@lhr.nu.edu.pk
+        // e.g. l240690@lhr.nu.edu.pk
+        return /^l\d{6}@lhr\.nu\.edu\.pk$/.test(v);
       },
-      message: 'Email must be a valid @lhr.nu.edu.pk address',
+      message: 'Email must follow the format l(year)(roll)@lhr.nu.edu.pk (e.g. l240690@lhr.nu.edu.pk)',
     },
   },
   password: {

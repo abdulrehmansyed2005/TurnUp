@@ -39,8 +39,9 @@ const Register = () => {
       return;
     }
 
-    if (!form.email.endsWith('@lhr.nu.edu.pk')) {
-      addToast('Please use your @lhr.nu.edu.pk email.', 'error');
+    // Enforce l(2-digit year)(4-digit roll)@lhr.nu.edu.pk
+    if (!/^l\d{6}@lhr\.nu\.edu\.pk$/.test(form.email)) {
+      addToast('Email must be in the format l240690@lhr.nu.edu.pk', 'error');
       return;
     }
 
@@ -113,12 +114,12 @@ const Register = () => {
                   type="email"
                   name="email"
                   className="form-input"
-                  placeholder="i220000@lhr.nu.edu.pk"
+                  placeholder="l240690@lhr.nu.edu.pk"
                   value={form.email}
                   onChange={handleChange}
                   autoComplete="email"
                 />
-                <p className="form-hint">Must be your @lhr.nu.edu.pk email</p>
+                <p className="form-hint">Format: l(year)(roll) e.g. l240690@lhr.nu.edu.pk</p>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

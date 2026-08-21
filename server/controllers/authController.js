@@ -19,9 +19,11 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'All fields are required.' });
     }
 
-    // Check email domain
-    if (!email.endsWith('@lhr.nu.edu.pk')) {
-      return res.status(400).json({ message: 'Only @lhr.nu.edu.pk email addresses are allowed.' });
+    // Enforce university email format: l(2-digit year)(4-digit roll)@lhr.nu.edu.pk
+    if (!/^l\d{6}@lhr\.nu\.edu\.pk$/.test(email)) {
+      return res.status(400).json({
+        message: 'Email must follow the format l(year)(roll)@lhr.nu.edu.pk (e.g. l240690@lhr.nu.edu.pk)',
+      });
     }
 
     // Check if user already exists
