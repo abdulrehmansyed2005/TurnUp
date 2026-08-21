@@ -1,33 +1,47 @@
-const Brevo = require('@getbrevo/brevo');
+const https = require('https');
 
-// Lazily initialised API client — created once and reused.
-let _apiInstance = null;
-
-const getApiInstance = () => {
-  if (_apiInstance) return _apiInstance;
-
-  const apiInstance = new Brevo.TransactionalEmailsApi();
-  apiInstance.setApiKey(
-    Brevo.TransactionalEmailsApiApiKeys.apiKey,
-    process.env.BREVO_API_KEY
-  );
-  _apiInstance = apiInstance;
-  return _apiInstance;
-};
-
+/**
+ * Send an email via Brevo's transactional email REST API.
+ * Uses Node's built-in https — no SDK dependency.
+ * Docs: https://developers.brevo.com/reference/sendtransacemail
+ */
 const sendEmail = async (to, subject, html) => {
-  const api = getApiInstance();
+  const payload = JSON.stringify({
+    sender: { name: 'TurnUp ⚽', email: process.env.EMAIL_FROM },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html,
+  });
 
-  const sendSmtpEmail = new Brevo.SendSmtpEmail();
-  sendSmtpEmail.sender = {
-    name: 'TurnUp ⚽',
-    email: process.env.EMAIL_FROM, // must be a verified sender in your Brevo account
-  };
-  sendSmtpEmail.to = [{ email: to }];
-  sendSmtpEmail.subject = subject;
-  sendSmtpEmail.htmlContent = html;
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'api.brevo.com',
+        path: '/v3/smtp/email',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': process.env.BREVO_API_KEY,
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (chunk) => (body += chunk));
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(JSON.parse(body));
+          } else {
+            reject(new Error(`Brevo API error ${res.statusCode}: ${body}`));
+          }
+        });
+      }
+    );
 
-  await api.sendTransacEmail(sendSmtpEmail);
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
 };
 
 const sendOTPEmail = async (email, otp) => {
