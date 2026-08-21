@@ -28,7 +28,10 @@ const Register = () => {
   const navigate = useNavigate();
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    let { name, value } = e.target;
+    // Normalize roll number: accept both 'l' and 'L', store as uppercase
+    if (name === 'rollNumber') value = value.toUpperCase();
+    setForm({ ...form, [name]: value });
   };
 
   const handleSubmit = async (e) => {
@@ -146,7 +149,7 @@ const Register = () => {
                     type="text"
                     name="rollNumber"
                     className="form-input"
-                    placeholder="4-digit roll number"
+                    placeholder="24L-****"
                     value={form.rollNumber}
                     onChange={handleChange}
                   />
