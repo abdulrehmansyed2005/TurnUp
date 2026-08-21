@@ -31,6 +31,8 @@ const Register = () => {
     let { name, value } = e.target;
     // Normalize roll number: accept both 'l' and 'L', store as uppercase
     if (name === 'rollNumber') value = value.toUpperCase();
+    // Email must start with lowercase l — auto-lowercase as user types
+    if (name === 'email') value = value.toLowerCase();
     setForm({ ...form, [name]: value });
   };
 
