@@ -17,6 +17,9 @@ client/.env.*.local
 # Local agent context file — keep local only
 PROJECT_CONTEXT.md
 
+# Pitch/internal documents — keep local only
+TurnUp_Pitch_Document.md
+
 # Logs
 *.log
 npm-debug.log*
