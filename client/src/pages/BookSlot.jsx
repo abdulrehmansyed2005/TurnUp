@@ -4,10 +4,12 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 
+const SPORT_ICONS = { Futsal: '⚽', Basketball: '🏀' };
+
 const BookSlot = () => {
   const [teamName, setTeamName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [result, setResult] = useState(null); // { waitlistPosition }
   const location = useLocation();
   const navigate = useNavigate();
   const { addToast } = useToast();
@@ -16,12 +18,14 @@ const BookSlot = () => {
   // Admins cannot book slots
   if (isAdmin) return <Navigate to="/admin" replace />;
 
-  const { slot, turfId, turfName } = location.state || {};
+  const { slot, turfId, turfName, sport } = location.state || {};
 
   if (!slot || !turfId) {
     navigate('/');
     return null;
   }
+
+  const sportIcon = SPORT_ICONS[sport] || '⚽';
 
   const formatTime = (time24) => {
     const [h, m] = time24.split(':').map(Number);
@@ -40,13 +44,13 @@ const BookSlot = () => {
 
     setLoading(true);
     try {
-      await api.post('/bookings', {
+      const res = await api.post('/bookings', {
         turfId,
         startTime: slot.startTime,
         endTime: slot.endTime,
         teamName: teamName.trim(),
       });
-      setSuccess(true);
+      setResult({ waitlistPosition: res.data.waitlistPosition });
     } catch (error) {
       addToast(error.response?.data?.message || 'Booking failed.', 'error');
     } finally {
@@ -54,16 +58,35 @@ const BookSlot = () => {
     }
   };
 
-  if (success) {
+  // ── Success / Waitlist Confirmation Screen ──
+  if (result) {
     return (
       <div className="page">
         <div className="success-animation">
-          <div className="success-icon">⚽</div>
-          <h2 className="success-title">Booking Submitted!</h2>
+          <div className="success-icon">{sportIcon}</div>
+          <h2 className="success-title">Added to Queue!</h2>
+
           <p className="success-message">
-            Your booking for {formatTime(slot.startTime)} — {formatTime(slot.endTime)} is pending admin approval.
+            Your request for {formatTime(slot.startTime)} — {formatTime(slot.endTime)} has been
+            submitted. You&apos;ll receive an email when the admin responds.
           </p>
-          <div style={{ marginTop: 32, display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+
+          <div className="waitlist-info-box">
+            <div className="waitlist-info-row">
+              <span>{sportIcon}</span>
+              <span>{turfName}</span>
+            </div>
+            <div className="waitlist-info-row">
+              <span>🕐</span>
+              <span>{formatTime(slot.startTime)} — {formatTime(slot.endTime)}</span>
+            </div>
+            <div className="waitlist-info-row">
+              <span>📧</span>
+              <span>You&apos;ll be notified by email when the admin responds</span>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
             <button
               className="btn btn-primary btn-full"
               onClick={() => navigate('/my-bookings')}
@@ -84,6 +107,7 @@ const BookSlot = () => {
     );
   }
 
+  // ── Booking Form ──
   return (
     <div className="page">
       <button className="btn btn-ghost" onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>
@@ -95,6 +119,10 @@ const BookSlot = () => {
       {/* Booking Summary */}
       <div className="booking-summary">
         <div className="booking-summary-title">Booking Summary</div>
+        <div className="booking-summary-row">
+          <span className="booking-summary-label">Sport</span>
+          <span className="booking-summary-value">{sportIcon} {sport || 'Futsal'}</span>
+        </div>
         <div className="booking-summary-row">
           <span className="booking-summary-label">Turf</span>
           <span className="booking-summary-value">{turfName}</span>
@@ -110,10 +138,6 @@ const BookSlot = () => {
           <span className="booking-summary-value">
             {formatTime(slot.startTime)} — {formatTime(slot.endTime)}
           </span>
-        </div>
-        <div className="booking-summary-row">
-          <span className="booking-summary-label">Sport</span>
-          <span className="booking-summary-value">⚽ Futsal</span>
         </div>
       </div>
 
@@ -146,7 +170,7 @@ const BookSlot = () => {
       </form>
 
       <p className="text-xs text-muted text-center" style={{ marginTop: 16 }}>
-        Your booking will be pending until the Sports Head approves it.
+        Your booking will be added to the queue. You'll be notified by email when the admin responds.
       </p>
     </div>
   );

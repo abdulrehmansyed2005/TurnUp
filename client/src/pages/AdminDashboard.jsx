@@ -23,23 +23,30 @@ const playNotificationSound = () => {
   }
 };
 
+const SPORTS = [
+  { key: 'all',        label: 'All Sports', icon: '🏅' },
+  { key: 'Futsal',     label: 'Futsal',     icon: '⚽' },
+  { key: 'Basketball', label: 'Basketball', icon: '🏀' },
+];
+
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [turf, setTurf] = useState(null);
+  const [allTurfs, setAllTurfs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('pending');
+  const [sportFilter, setSportFilter] = useState('all');
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [actionModal, setActionModal] = useState(null);
   const [adminNote, setAdminNote] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [blockForm, setBlockForm] = useState({ startTime: '', endTime: '', reason: '' });
+  const [blockForm, setBlockForm] = useState({ turfId: '', startTime: '', endTime: '', reason: '' });
   const [showBlockForm, setShowBlockForm] = useState(false);
-  const [turfId, setTurfId] = useState('');
   const { addToast } = useToast();
-  const prevPendingCount = useRef(null);   // FIX #8: track previous pendingCount for diff
-  const tabFlashInterval = useRef(null);   // FIX #8: tab title flash interval
+  const prevPendingCount = useRef(null);
+  const tabFlashInterval = useRef(null);
 
   const isToday = selectedDate === new Date().toISOString().slice(0, 10);
 
@@ -48,14 +55,13 @@ const AdminDashboard = () => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
-    // Clean up tab flash on unmount
     return () => {
       if (tabFlashInterval.current) clearInterval(tabFlashInterval.current);
       document.title = 'TurnUp ⚽ — Admin';
     };
   }, []);
 
-  // FIX #8: Flash the tab title to draw attention
+  // FIX #8: Flash tab title to draw attention
   const startTabFlash = (count) => {
     if (tabFlashInterval.current) clearInterval(tabFlashInterval.current);
     let toggle = true;
@@ -65,7 +71,6 @@ const AdminDashboard = () => {
         : 'Admin Dashboard — TurnUp';
       toggle = !toggle;
     }, 1000);
-    // Stop flashing after 30 seconds
     setTimeout(() => {
       if (tabFlashInterval.current) clearInterval(tabFlashInterval.current);
       document.title = 'TurnUp ⚽ — Admin';
@@ -75,10 +80,12 @@ const AdminDashboard = () => {
   const fetchData = useCallback(async () => {
     try {
       const dateParam = `date=${selectedDate}`;
+      const sportParam = sportFilter !== 'all' ? `&sport=${sportFilter}` : '';
       const statusParam = tab !== 'all' ? `&status=${tab}` : '';
+
       const [statsRes, bookingsRes, turfsRes, blockedRes] = await Promise.all([
-        api.get(`/admin/stats?${dateParam}`),
-        api.get(`/admin/bookings?${dateParam}${statusParam}`),
+        api.get(`/admin/stats?${dateParam}${sportParam}`),
+        api.get(`/admin/bookings?${dateParam}${statusParam}${sportParam}`),
         api.get('/turfs'),
         api.get(`/admin/blocked-slots?${dateParam}`),
       ]);
@@ -91,7 +98,6 @@ const AdminDashboard = () => {
         const diff = newPending - prevPendingCount.current;
         playNotificationSound();
         startTabFlash(diff);
-        // Browser push notification
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification('TurnUp ⚽ — New Booking', {
             body: `${diff} new booking request${diff > 1 ? 's' : ''} waiting for approval.`,
@@ -106,9 +112,13 @@ const AdminDashboard = () => {
       setStats(newStats);
       setBookings(bookingsRes.data.bookings);
       setBlockedSlots(blockedRes.data.blockedSlots || []);
-      if (turfsRes.data.turfs.length > 0) {
-        setTurfId(turfsRes.data.turfs[0]._id);
-        setTurf(turfsRes.data.turfs[0]);
+
+      const turfs = turfsRes.data.turfs || [];
+      setAllTurfs(turfs);
+      if (turfs.length > 0) {
+        setTurf(turfs[0]);
+        // Pre-select turfId for block form if not set
+        setBlockForm((f) => ({ ...f, turfId: f.turfId || turfs[0]._id }));
       }
     } catch (error) {
       addToast('Failed to load data.', 'error');
@@ -116,11 +126,10 @@ const AdminDashboard = () => {
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, selectedDate, addToast]);
+  }, [tab, selectedDate, sportFilter, addToast]);
 
   useEffect(() => {
     fetchData();
-    // Refresh every 15 seconds for admin
     const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
   }, [fetchData]);
@@ -156,20 +165,19 @@ const AdminDashboard = () => {
 
   const handleBlockSlot = async (e) => {
     e.preventDefault();
-    if (!blockForm.startTime || !blockForm.reason) {
+    if (!blockForm.turfId || !blockForm.startTime || !blockForm.reason) {
       addToast('Please fill in all fields.', 'warning');
       return;
     }
-
     try {
       await api.post('/admin/block-slot', {
-        turfId,
+        turfId: blockForm.turfId,
         startTime: blockForm.startTime,
         endTime: blockForm.endTime,
         reason: blockForm.reason,
       });
       addToast('Slot blocked successfully.', 'success');
-      setBlockForm({ startTime: '', endTime: '', reason: '' });
+      setBlockForm((f) => ({ ...f, startTime: '', endTime: '', reason: '' }));
       setShowBlockForm(false);
       fetchData();
     } catch (error) {
@@ -187,13 +195,14 @@ const AdminDashboard = () => {
     }
   };
 
-  // FIX #6: Derive slot options dynamically from turf data instead of hardcoding
+  // Generate slot options for the selected turf in block form
+  const selectedBlockTurf = allTurfs.find((t) => t._id === blockForm.turfId) || turf;
   const slotOptions = (() => {
-    if (!turf) return [];
+    if (!selectedBlockTurf) return [];
     const slots = [];
-    const [openH] = turf.openTime.split(':').map(Number);
-    const [closeH] = turf.closeTime.split(':').map(Number);
-    const duration = turf.slotDuration; // minutes
+    const [openH] = selectedBlockTurf.openTime.split(':').map(Number);
+    const [closeH] = selectedBlockTurf.closeTime.split(':').map(Number);
+    const duration = selectedBlockTurf.slotDuration;
     for (let h = openH; h < closeH; h += duration / 60) {
       const start = `${String(h).padStart(2, '0')}:00`;
       const endH = h + duration / 60;
@@ -204,11 +213,20 @@ const AdminDashboard = () => {
   })();
 
   const statusEmoji = {
-    pending: '⏳',
-    approved: '✅',
-    rejected: '❌',
-    cancelled: '🚫',
-    expired: '⌛',
+    pending: '⏳', approved: '✅', rejected: '❌', cancelled: '🚫', expired: '⌛',
+  };
+
+  const sportIcon = (booking) => {
+    const sport = booking.turf?.sportTypes?.[0];
+    if (sport === 'Basketball') return '🏀';
+    return '⚽';
+  };
+
+  // Priority badge styling
+  const priorityBadge = (pos, total) => {
+    if (pos === 1) return { label: '#1 Priority', cls: 'priority-badge priority-1' };
+    if (pos === total) return { label: `#${pos} In Queue`, cls: 'priority-badge priority-last' };
+    return { label: `#${pos} In Queue`, cls: 'priority-badge priority-n' };
   };
 
   if (loading) {
@@ -224,6 +242,7 @@ const AdminDashboard = () => {
 
   return (
     <div className="page">
+      {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <h1 className="heading-md">Admin Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -254,7 +273,21 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* Stats — FIX #7: now date-aware, FIX #20: show cancelled/rejected */}
+      {/* Sport Filter */}
+      <div className="sport-tabs" style={{ marginBottom: 16 }}>
+        {SPORTS.map((s) => (
+          <button
+            key={s.key}
+            className={`sport-tab ${sportFilter === s.key ? 'active' : ''}`}
+            onClick={() => setSportFilter(s.key)}
+            id={`admin-sport-${s.key}`}
+          >
+            {s.icon} {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats */}
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-value">{stats?.pendingCount || 0}</div>
@@ -296,6 +329,26 @@ const AdminDashboard = () => {
       {showBlockForm && (
         <form className="block-slot-form" onSubmit={handleBlockSlot}>
           <h3 className="heading-sm" style={{ marginBottom: 16 }}>Block a Slot</h3>
+
+          {/* Turf selector (shows both sports) */}
+          {allTurfs.length > 1 && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="block-turf-select">Sport / Turf</label>
+              <select
+                id="block-turf-select"
+                className="form-input"
+                value={blockForm.turfId}
+                onChange={(e) => setBlockForm({ ...blockForm, turfId: e.target.value, startTime: '', endTime: '' })}
+              >
+                {allTurfs.map((t) => (
+                  <option key={t._id} value={t._id}>
+                    {t.sportTypes?.[0] === 'Basketball' ? '🏀' : '⚽'} {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="form-group">
             <label className="form-label" htmlFor="block-slot-select">Select Slot</label>
             <select
@@ -321,7 +374,7 @@ const AdminDashboard = () => {
               id="block-reason"
               type="text"
               className="form-input"
-              placeholder="e.g., Turf maintenance"
+              placeholder="e.g., Court maintenance"
               value={blockForm.reason}
               onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })}
             />
@@ -335,17 +388,16 @@ const AdminDashboard = () => {
       {/* Blocked Slots List */}
       {blockedSlots.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 className="heading-sm" style={{ marginBottom: 10 }}>🚫 Today's Blocked Slots</h3>
+          <h3 className="heading-sm" style={{ marginBottom: 10 }}>🚫 Blocked Slots</h3>
           {blockedSlots.map((slot) => (
             <div key={slot._id} className="admin-booking-card" id={`blocked-slot-${slot._id}`}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
                 <div className="admin-booking-time">
+                  {slot.turf?.sportTypes?.[0] === 'Basketball' ? '🏀' : '⚽'}{' '}
                   {formatTime(slot.startTime)} — {formatTime(slot.endTime)}
                 </div>
-                <div className="text-sm text-muted" style={{ marginTop: 4 }}>
-                  🔴 {slot.reason}
-                </div>
+                <div className="text-sm text-muted" style={{ marginTop: 4 }}>🔴 {slot.reason}</div>
               </div>
               <button
                 className="btn btn-secondary btn-sm"
@@ -359,7 +411,7 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Status Tabs */}
       <div className="tabs">
         <button className={`tab ${tab === 'pending' ? 'active' : ''}`} onClick={() => setTab('pending')}>
           Pending {stats?.pendingCount > 0 ? `(${stats.pendingCount})` : ''}
@@ -379,46 +431,64 @@ const AdminDashboard = () => {
           <p className="empty-text">No {tab} bookings</p>
         </div>
       ) : (
-        bookings.map((booking) => (
-          <div key={booking._id} className="admin-booking-card" id={`admin-booking-${booking._id}`}>
-            <div className="admin-booking-header">
-              <span className="admin-booking-time">
-                {formatTime(booking.startTime)} — {formatTime(booking.endTime)}
-              </span>
-              <span className={`status-badge ${booking.status}`}>
-                {statusEmoji[booking.status]} {booking.status}
-              </span>
-            </div>
+        bookings.map((booking) => {
+          const badge = booking.status === 'pending' && booking.waitlistPosition
+            ? priorityBadge(booking.waitlistPosition, booking.slotQueueSize)
+            : null;
 
-            <div className="admin-booking-details">
-              <div>👤 <strong>{booking.user?.name}</strong> ({booking.user?.rollNumber})</div>
-              <div>📧 {booking.user?.email}</div>
-              <div>🏢 {booking.user?.department}</div>
-              <div>👥 Team: <strong>{booking.teamName}</strong></div>
-            </div>
-
-            {booking.status === 'pending' && (
-              <div className="admin-actions">
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => setActionModal({ booking, action: 'approve' })}
-                  id={`approve-${booking._id}`}
-                  style={{ flex: 1 }}
-                >
-                  ✅ Approve
-                </button>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={() => setActionModal({ booking, action: 'reject' })}
-                  id={`reject-${booking._id}`}
-                  style={{ flex: 1 }}
-                >
-                  ❌ Reject
-                </button>
+          return (
+            <div key={booking._id} className="admin-booking-card" id={`admin-booking-${booking._id}`}>
+              <div className="admin-booking-header">
+                <span className="admin-booking-time">
+                  {sportIcon(booking)} {formatTime(booking.startTime)} — {formatTime(booking.endTime)}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {badge && (
+                    <span className={badge.cls}>{badge.label}</span>
+                  )}
+                  <span className={`status-badge ${booking.status}`}>
+                    {statusEmoji[booking.status]} {booking.status}
+                  </span>
+                </div>
               </div>
-            )}
-          </div>
-        ))
+
+              {/* Queue size indicator for pending slots */}
+              {booking.status === 'pending' && booking.slotQueueSize > 1 && (
+                <div className="queue-size-info">
+                  👥 {booking.slotQueueSize} {booking.slotQueueSize === 1 ? 'request' : 'requests'} for this slot
+                </div>
+              )}
+
+              <div className="admin-booking-details">
+                <div>👤 <strong>{booking.user?.name}</strong> ({booking.user?.rollNumber})</div>
+                <div>📧 {booking.user?.email}</div>
+                <div>🏢 {booking.user?.department}</div>
+                <div>👥 Team: <strong>{booking.teamName}</strong></div>
+              </div>
+
+              {booking.status === 'pending' && (
+                <div className="admin-actions">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setActionModal({ booking, action: 'approve' })}
+                    id={`approve-${booking._id}`}
+                    style={{ flex: 1 }}
+                  >
+                    ✅ Approve
+                  </button>
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => setActionModal({ booking, action: 'reject' })}
+                    id={`reject-${booking._id}`}
+                    style={{ flex: 1 }}
+                  >
+                    ❌ Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
 
       {/* Action Modal */}
@@ -446,6 +516,15 @@ const AdminDashboard = () => {
           <strong>{actionModal?.booking?.user?.name}</strong> for{' '}
           <strong>{actionModal?.booking && formatTime(actionModal.booking.startTime)}</strong>?
         </p>
+        {actionModal?.action === 'approve' && actionModal?.booking?.slotQueueSize > 1 && (
+          <div className="banner warning" style={{ marginBottom: 12, padding: '10px 12px', fontSize: 'var(--font-xs)' }}>
+            <span>⚠️</span>
+            <span>
+              This slot has <strong>{actionModal.booking.slotQueueSize}</strong> pending requests.
+              Approving will auto-reject the others and notify them by email.
+            </span>
+          </div>
+        )}
         <div className="form-group" style={{ marginBottom: 0 }}>
           <label className="form-label" htmlFor="admin-note">Note (optional)</label>
           <input

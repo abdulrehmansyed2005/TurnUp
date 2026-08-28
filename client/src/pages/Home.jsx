@@ -4,7 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import api from '../utils/api';
 
+const SPORTS = [
+  { key: 'Futsal',     label: 'Futsal',     icon: '⚽' },
+  { key: 'Basketball', label: 'Basketball', icon: '🏀' },
+];
+
 const Home = () => {
+  const [sport, setSport] = useState('Futsal');
   const [slotsData, setSlotsData] = useState(null);
   const [loading, setLoading] = useState(true);
   const { user, isAdmin } = useAuth();
@@ -16,16 +22,18 @@ const Home = () => {
 
   const fetchSlots = useCallback(async () => {
     try {
-      const res = await api.get('/bookings/available');
+      const res = await api.get(`/bookings/available?sport=${sport}`);
       setSlotsData(res.data);
     } catch (error) {
       addToast('Failed to load slots.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, sport]);
 
   useEffect(() => {
+    setLoading(true);
+    setSlotsData(null);
     fetchSlots();
     const interval = setInterval(fetchSlots, 30000);
     return () => clearInterval(interval);
@@ -49,7 +57,7 @@ const Home = () => {
   const handleSlotClick = (slot) => {
     if (slot.status !== 'available') return;
     if (slotsData?.userHasActiveBooking) {
-      addToast('You already have a booking today.', 'warning');
+      addToast(`You already have a ${sport} booking today.`, 'warning');
       return;
     }
     if (slotsData?.userIsLockedOut) {
@@ -57,16 +65,40 @@ const Home = () => {
       return;
     }
     navigate(`/book/${slot.startTime}`, {
-      state: { slot, turfId: slotsData.turf.id, turfName: slotsData.turf.name },
+      state: {
+        slot,
+        turfId: slotsData.turf.id,
+        turfName: slotsData.turf.name,
+        sport: slotsData.turf.sport,
+      },
     });
   };
+
+  const currentSport = SPORTS.find((s) => s.key === sport);
+  const sportIcon = currentSport?.icon || '⚽';
+
+  const SportTabs = () => (
+    <div className="sport-tabs">
+      {SPORTS.map((s) => (
+        <button
+          key={s.key}
+          className={`sport-tab ${sport === s.key ? 'active' : ''}`}
+          onClick={() => setSport(s.key)}
+          id={`sport-tab-${s.key.toLowerCase()}`}
+        >
+          {s.icon} {s.label}
+        </button>
+      ))}
+    </div>
+  );
 
   if (loading) {
     return (
       <div className="page">
+        <SportTabs />
         <div className="loading-container">
           <div className="loading-spinner" />
-          <p className="loading-text">Loading today's slots...</p>
+          <p className="loading-text">Loading {sport} slots...</p>
         </div>
       </div>
     );
@@ -75,6 +107,7 @@ const Home = () => {
   if (slotsData && !slotsData.isOperatingDay) {
     return (
       <div className="page">
+        <SportTabs />
         <div className="weekend-closed">
           <div className="weekend-icon">🏖️</div>
           <h2 className="heading-md">Turf is Closed Today</h2>
@@ -88,16 +121,21 @@ const Home = () => {
   }
 
   const canBook = !slotsData?.userHasActiveBooking && !slotsData?.userIsLockedOut;
+  const userPos = slotsData?.userWaitlistPosition;
+  const userBookingTime = slotsData?.userActiveBookingTime;
 
   return (
     <div className="page home-page">
+      {/* Sport Switcher */}
+      <SportTabs />
+
       {/* Header */}
       <div className="home-header">
         <p className="home-greeting">Hey, {user?.name?.split(' ')[0]} 👋</p>
         <h1 className="home-date">
           <span className="home-day">{getDayName()}</span> Slots
         </h1>
-        <p className="home-turf-name">🏟️ {slotsData?.turf?.name || 'Futsal Turf'}</p>
+        <p className="home-turf-name">{sportIcon} {slotsData?.turf?.name || `${sport} Court`}</p>
         <p className="text-xs text-muted" style={{ marginTop: 4 }}>
           {slotsData?.date ? formatDate(slotsData.date) : ''}
         </p>
@@ -108,9 +146,16 @@ const Home = () => {
         <div className="banner info">
           <span className="banner-icon">📋</span>
           <div>
-            <strong>You have a booking today.</strong><br />
-            <span style={{ cursor: 'pointer', textDecoration: 'underline' }}
-              onClick={() => navigate('/my-bookings')}>
+            <strong>
+              {userBookingTime
+                ? `You have a pending booking for ${formatTime(userBookingTime.startTime)}`
+                : 'You have a booking today.'}
+            </strong>
+            <br />
+            <span
+              style={{ cursor: 'pointer', textDecoration: 'underline' }}
+              onClick={() => navigate('/my-bookings')}
+            >
               View your booking →
             </span>
           </div>
@@ -135,7 +180,7 @@ const Home = () => {
       </div>
 
       {/* Slot schedule */}
-      <h2 className="section-title">⚽ Today's Slots</h2>
+      <h2 className="section-title">{sportIcon} Today's Slots</h2>
 
       <div className="schedule-grid">
         {slotsData?.slots?.map((slot, i) => {
@@ -153,7 +198,7 @@ const Home = () => {
                 <span className="schedule-time-end">{formatTime(slot.endTime)}</span>
               </div>
 
-              {/* Colored box — right column */}
+              {/* Status box — right column */}
               <div
                 className={`schedule-box ${slot.status}`}
                 onClick={() => handleSlotClick(slot)}
@@ -172,7 +217,11 @@ const Home = () => {
                   <>
                     <span className="schedule-box-icon">⏳</span>
                     <span className="schedule-box-team">{slot.teamName}</span>
-                    <span className="schedule-box-sublabel">Awaiting approval</span>
+                    <span className="schedule-box-sublabel">
+                      {slot.waitlistCount > 1
+                        ? `${slot.waitlistCount} in queue`
+                        : 'Awaiting approval'}
+                    </span>
                   </>
                 )}
                 {slot.status === 'booked' && (
@@ -186,7 +235,7 @@ const Home = () => {
                   <>
                     <span className="schedule-box-icon">🚫</span>
                     <span className="schedule-box-label">
-                      {slot.reason ? `${slot.reason}` : 'Blocked'}
+                      {slot.reason || 'Blocked'}
                     </span>
                   </>
                 )}

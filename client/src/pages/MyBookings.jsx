@@ -168,7 +168,10 @@ const MyBookings = () => {
               </div>
               <div className="booking-detail-row">
                 <span>🏟️</span>
-                <span>{booking.turf?.name || 'Futsal Turf'}</span>
+                <span>
+                  {booking.turf?.sportTypes?.[0] === 'Basketball' ? '🏀' : '⚽'}{' '}
+                  {booking.turf?.name || 'Futsal Turf'}
+                </span>
               </div>
               <div className="booking-detail-row">
                 <span>👥</span>

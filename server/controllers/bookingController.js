@@ -43,30 +43,32 @@ const autoExpirePendingBookings = async () => {
 };
 
 // @route   GET /api/bookings/available
-// @desc    Get today's slot availability (no user identity revealed)
+// @desc    Get today's slot availability for a given sport (?sport=Futsal|Basketball)
 // @access  Private
 const getAvailableSlots = async (req, res) => {
   try {
+    const { sport } = req.query;
     const today = getTodayDate();
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const dayOfWeek = now.getDay();
     const currentTime = getCurrentTime();
 
-    // Find the turf
-    const turf = await Turf.findOne({ isActive: true });
+    // Find turf by sport type, or default to first active turf
+    const turfQuery = { isActive: true };
+    if (sport) {
+      turfQuery.sportTypes = sport; // MongoDB matches if array contains this value
+    }
+    const turf = await Turf.findOne(turfQuery);
     if (!turf) {
-      return res.status(404).json({ message: 'No active turf found.' });
+      return res.status(404).json({ message: 'No active turf found for this sport.' });
     }
 
-    // Check if today is an operating day
     const isOperatingDay = turf.operatingDays.includes(dayOfWeek);
-
-    // Generate all possible slots
     const allSlots = turf.generateSlots();
 
     if (!isOperatingDay) {
       return res.json({
-        turf: { id: turf._id, name: turf.name },
+        turf: { id: turf._id, name: turf.name, sport: turf.sportTypes[0] || 'Futsal' },
         date: today,
         isOperatingDay: false,
         slots: [],
@@ -74,32 +76,28 @@ const getAvailableSlots = async (req, res) => {
       });
     }
 
-    // Auto-expire pending bookings
+    // Auto-expire pending bookings whose time has passed
     await autoExpirePendingBookings();
 
-    // Get today's bookings (active ones: pending or approved)
+    // Fetch all active bookings for this turf today, sorted by createdAt for priority
     const bookings = await Booking.find({
       turf: turf._id,
       date: today,
       status: { $in: ['pending', 'approved'] },
-    });
+    }).sort({ createdAt: 1 });
 
-    // Get today's blocked slots
-    const blockedSlots = await BlockedSlot.find({
-      turf: turf._id,
-      date: today,
-    });
+    // Fetch today's blocked slots
+    const blockedSlots = await BlockedSlot.find({ turf: turf._id, date: today });
 
-    // Check if current user has an active booking today
-    const userActiveBooking = await Booking.findOne({
-      user: req.user._id,
-      date: today,
-      status: { $in: ['pending', 'approved'] },
-    });
+    // Check if current user has an active booking for THIS turf today
+    const userActiveBooking = bookings.find(
+      (b) => b.user.toString() === req.user._id.toString()
+    ) || null;
 
-    // Check if user is locked out (cancelled within 2 hours of slot)
+    // Check if user is locked out for this turf (cancelled within 2 hours)
     const userCancelledBooking = await Booking.findOne({
       user: req.user._id,
+      turf: turf._id,
       date: today,
       status: 'cancelled',
       canRebook: false,
@@ -107,37 +105,55 @@ const getAvailableSlots = async (req, res) => {
 
     // Build slot status list
     const slots = allSlots.map((slot) => {
-      const booking = bookings.find((b) => b.startTime === slot.startTime);
+      const slotBookings = bookings.filter((b) => b.startTime === slot.startTime);
+      const approvedBooking = slotBookings.find((b) => b.status === 'approved');
+      // Already sorted by createdAt ascending → index 0 = highest priority
+      const pendingBookings = slotBookings.filter((b) => b.status === 'pending');
       const blocked = blockedSlots.find((b) => b.startTime === slot.startTime);
       const isElapsed = timeToMinutes(slot.startTime) <= timeToMinutes(currentTime);
 
-      if (isElapsed) {
-        return { ...slot, status: 'elapsed' };
+      if (isElapsed) return { ...slot, status: 'elapsed' };
+      if (blocked) return { ...slot, status: 'blocked', reason: blocked.reason };
+
+      if (approvedBooking) {
+        return { ...slot, status: 'booked', teamName: approvedBooking.teamName };
       }
 
-      if (blocked) {
-        return { ...slot, status: 'blocked', reason: blocked.reason };
-      }
-
-      if (booking) {
+      if (pendingBookings.length > 0) {
         return {
           ...slot,
-          status: booking.status === 'approved' ? 'booked' : 'pending',
-          teamName: booking.teamName, // Show team name in the slot box
+          status: 'pending',
+          teamName: pendingBookings[0].teamName, // #1 in queue
+          waitlistCount: pendingBookings.length,
         };
       }
 
       return { ...slot, status: 'available' };
     });
 
+    // Calculate user's waitlist position for their active booking
+    let userWaitlistPosition = null;
+    if (userActiveBooking && userActiveBooking.status === 'pending') {
+      const slotPending = bookings.filter(
+        (b) => b.startTime === userActiveBooking.startTime && b.status === 'pending'
+      );
+      // Already sorted by createdAt, so indexOf gives priority position
+      userWaitlistPosition =
+        slotPending.findIndex((b) => b._id.toString() === userActiveBooking._id.toString()) + 1;
+    }
+
     res.json({
-      turf: { id: turf._id, name: turf.name },
+      turf: { id: turf._id, name: turf.name, sport: turf.sportTypes[0] || 'Futsal' },
       date: today,
       isOperatingDay: true,
       slots,
       userHasActiveBooking: !!userActiveBooking,
       userIsLockedOut: !!userCancelledBooking,
       userActiveBookingId: userActiveBooking?._id || null,
+      userActiveBookingTime: userActiveBooking
+        ? { startTime: userActiveBooking.startTime, endTime: userActiveBooking.endTime }
+        : null,
+      userWaitlistPosition,
     });
   } catch (error) {
     console.error('Get available slots error:', error);
@@ -146,7 +162,7 @@ const getAvailableSlots = async (req, res) => {
 };
 
 // @route   POST /api/bookings
-// @desc    Create a new booking
+// @desc    Create a new booking — joins waitlist if slot already has pending requests
 // @access  Private
 const createBooking = async (req, res) => {
   try {
@@ -192,17 +208,20 @@ const createBooking = async (req, res) => {
     // Auto-expire pending bookings
     await autoExpirePendingBookings();
 
-    // Check if user already has an active booking today
+    // Check if user already has an active booking for THIS TURF today (per-sport rule)
     const existingBooking = await Booking.findOne({
       user: req.user._id,
+      turf: turfId,
       date: today,
       status: { $in: ['pending', 'approved'] },
     });
     if (existingBooking) {
-      return res.status(400).json({ message: 'You already have a booking for today. One slot per person per day.' });
+      return res.status(400).json({
+        message: `You already have a booking for this sport today. One slot per sport per day.`,
+      });
     }
 
-    // FIX #14: Block re-booking the exact same slot that was previously rejected
+    // Block re-booking the exact same slot that was previously rejected today
     const rejectedSameSlot = await Booking.findOne({
       user: req.user._id,
       turf: turfId,
@@ -216,57 +235,72 @@ const createBooking = async (req, res) => {
       });
     }
 
-    // Check if user is locked out (cancelled within 2 hours)
+    // Check if user is locked out for this turf (cancelled within 2 hours)
     const cancelledBooking = await Booking.findOne({
       user: req.user._id,
+      turf: turfId,
       date: today,
       status: 'cancelled',
       canRebook: false,
     });
     if (cancelledBooking) {
-      return res.status(400).json({ message: 'You cancelled a booking too close to slot time. You cannot rebook today.' });
+      return res.status(400).json({
+        message: 'You cancelled a booking too close to slot time. You cannot rebook today.',
+      });
     }
 
-    // Check if slot is blocked
-    const blockedSlot = await BlockedSlot.findOne({
-      turf: turfId,
-      date: today,
-      startTime,
-    });
+    // Check if slot is blocked by admin
+    const blockedSlot = await BlockedSlot.findOne({ turf: turfId, date: today, startTime });
     if (blockedSlot) {
       return res.status(400).json({ message: `This slot is blocked: ${blockedSlot.reason}` });
     }
 
-    // Check if slot is already booked
-    const existingSlotBooking = await Booking.findOne({
+    // Block joining if the slot is already APPROVED — no waitlist after confirmation
+    const approvedSlot = await Booking.findOne({
       turf: turfId,
       date: today,
       startTime,
-      status: { $in: ['pending', 'approved'] },
+      status: 'approved',
     });
-    if (existingSlotBooking) {
-      return res.status(400).json({ message: 'This slot is already booked.' });
+    if (approvedSlot) {
+      return res.status(400).json({
+        message: 'This slot has already been confirmed for another team.',
+      });
     }
 
-    // Create booking
+    // Create booking — joins the waitlist if others are already pending
     const booking = await Booking.create({
       user: req.user._id,
       turf: turfId,
       date: today,
       startTime,
       endTime,
-      teamName: sanitizeTeamName(teamName), // H2: strip any HTML before storing
+      teamName: sanitizeTeamName(teamName),
       status: 'pending',
     });
 
+    // Determine waitlist position (sorted by createdAt ascending)
+    const slotPending = await Booking.find({
+      turf: turfId,
+      date: today,
+      startTime,
+      status: 'pending',
+    }).sort({ createdAt: 1 });
+
+    const waitlistPosition =
+      slotPending.findIndex((b) => b._id.toString() === booking._id.toString()) + 1;
+
     res.status(201).json({
-      message: 'Booking created! Waiting for admin approval.',
+      message: 'Added to the queue! You\'ll be notified by email when the admin responds.',
       booking,
+      waitlistPosition,
     });
   } catch (error) {
     console.error('Create booking error:', error);
     if (error.code === 11000) {
-      return res.status(400).json({ message: 'This slot is already booked.' });
+      return res.status(400).json({
+        message: 'You already have a booking for this sport today.',
+      });
     }
     res.status(500).json({ message: 'Server error. Please try again.' });
   }
@@ -292,7 +326,7 @@ const getMyBookings = async (req, res) => {
     await autoExpirePendingBookings();
 
     const bookings = await Booking.find(query)
-      .populate('turf', 'name')
+      .populate('turf', 'name sportTypes')
       .sort({ date: -1, startTime: -1 });
 
     res.json({ bookings });
@@ -328,7 +362,7 @@ const cancelBooking = async (req, res) => {
       return res.status(400).json({ message: 'This booking cannot be cancelled.' });
     }
 
-    // FIX #15: Prevent cancellation once the slot's end time has passed (it's history)
+    // FIX #15: Prevent cancellation once the slot's end time has passed
     const currentTime = getCurrentTime();
     if (timeToMinutes(booking.endTime) <= timeToMinutes(currentTime)) {
       return res.status(400).json({ message: 'Cannot cancel a slot that has already ended.' });
@@ -342,7 +376,9 @@ const cancelBooking = async (req, res) => {
       status: 'cancelled',
     });
     if (cancelledTodayCount >= 3) {
-      return res.status(400).json({ message: 'You have reached the daily cancellation limit (3). Please contact the sports office.' });
+      return res.status(400).json({
+        message: 'You have reached the daily cancellation limit (3). Please contact the sports office.',
+      });
     }
 
     // Calculate 2-hour rule
@@ -350,8 +386,6 @@ const cancelBooking = async (req, res) => {
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const slotMinutes = timeToMinutes(booking.startTime);
     const hoursUntilSlot = (slotMinutes - currentMinutes) / 60;
-
-    // Can rebook if cancelled 2+ hours before slot
     const canRebook = hoursUntilSlot >= 2;
 
     booking.status = 'cancelled';

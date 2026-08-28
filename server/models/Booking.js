@@ -51,27 +51,29 @@ const bookingSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Compound index to prevent double-booking the same slot
+// Unique index: only ONE approved booking is allowed per slot.
+// Pending requests do NOT block others from joining the waitlist.
 bookingSchema.index(
   { turf: 1, date: 1, startTime: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      status: { $in: ['pending', 'approved'] },
+      status: 'approved',
     },
+    name: 'unique_approved_booking_per_slot',
   }
 );
 
-// FIX #17: Compound unique index prevents a user from having more than one
-// active (pending/approved) booking per day — even under concurrent requests.
+// One active booking per user per turf per day (Option B: per-sport rule).
+// A student can book Futsal AND Basketball independently on the same day.
 bookingSchema.index(
-  { user: 1, date: 1 },
+  { user: 1, turf: 1, date: 1 },
   {
     unique: true,
     partialFilterExpression: {
       status: { $in: ['pending', 'approved'] },
     },
-    name: 'unique_active_booking_per_user_per_day',
+    name: 'unique_active_booking_per_user_per_turf_per_day',
   }
 );
 
